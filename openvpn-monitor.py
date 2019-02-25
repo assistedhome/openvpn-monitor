@@ -21,18 +21,6 @@ try:
 except ImportError:
     from ipaddress import ip_address, IPv6Address
 
-try:
-    import GeoIP as geoip1
-    geoip1_available = True
-except ImportError:
-    geoip1_available = False
-
-try:
-    from geoip2 import database
-    geoip2_available = True
-except ImportError:
-    geoip2_available = False
-
 import socket
 import re
 import argparse
@@ -115,8 +103,6 @@ class ConfigLoader(object):
     def load_default_settings(self):
         info('Using default settings => localhost:5555')
         self.settings = {'site': 'Default Site',
-                         'maps': 'True',
-                         'geoip_data': '/usr/share/GeoIP/GeoIPCity.dat',
                          'datetime_format': '%d/%m/%Y %H:%M:%S'}
         self.vpns['Default VPN'] = {'name': 'default',
                                     'host': 'localhost',
@@ -124,7 +110,7 @@ class ConfigLoader(object):
                                     'show_disconnect': False}
 
     def parse_global_section(self, config):
-        global_vars = ['site', 'logo', 'latitude', 'longitude', 'maps', 'geoip_data', 'datetime_format']
+        global_vars = ['site', 'logo', 'datetime_format']
         for var in global_vars:
             try:
                 self.settings[var] = config.get('openvpn-monitor', var)
@@ -178,18 +164,6 @@ class OpenvpnMgmtInterface(object):
                     command = 'kill {0!s}:{1!s}\n'.format(kwargs['ip'], kwargs['port'])
                 self.send_command(command)
                 self._socket_disconnect()
-
-        geoip_data = cfg.settings['geoip_data']
-        if geoip_data.endswith('.mmdb') and geoip2_available:
-            self.gi = database.Reader(geoip_data)
-            self.geoip_version = 2
-        elif geoip_data.endswith('.dat') and geoip1_available:
-            self.gi = geoip1.open(geoip_data, geoip1.GEOIP_STANDARD)
-            self.geoip_version = 1
-        else:
-            warning('No compatible geoip1 or geoip2 data/libraries found.')
-            self.geoip_version = None
-            self.gi = None
 
         for key, vpn in list(self.vpns.items()):
             self._socket_connect(vpn)
@@ -312,8 +286,6 @@ class OpenvpnMgmtInterface(object):
         return stats
 
     def parse_status(self, data, version):
-        gi = self.gi
-        geoip_version = self.geoip_version
         client_section = False
         routes_section = False
         sessions = {}
@@ -385,26 +357,7 @@ class OpenvpnMgmtInterface(object):
                     session['port'] = ''
                 if session['remote_ip'].is_private:
                     session['location'] = 'RFC1918'
-                else:
-                    try:
-                        if geoip_version == 1:
-                            gir = gi.record_by_addr(str(session['remote_ip']))
-                            session['location'] = gir['country_code']
-                            session['region'] = get_str(gir['region'])
-                            session['city'] = get_str(gir['city'])
-                            session['country'] = gir['country_name']
-                            session['longitude'] = gir['longitude']
-                            session['latitude'] = gir['latitude']
-                        elif geoip_version == 2:
-                            gir = gi.city(str(session['remote_ip']))
-                            session['location'] = gir.country.iso_code
-                            session['region'] = gir.subdivisions.most_specific.iso_code
-                            session['city'] = gir.city.name
-                            session['country'] = gir.country.name
-                            session['longitude'] = gir.location.longitude
-                            session['latitude'] = gir.location.latitude
-                    except SystemError:
-                        pass
+
                 local_ipv4 = parts.popleft()
                 if local_ipv4:
                     session['local_ip'] = ip_address(local_ipv4)
@@ -460,12 +413,9 @@ class OpenvpnHtmlPrinter(object):
                 self.print_vpn(key, vpn)
             else:
                 self.print_unavailable_vpn(vpn)
-        if self.maps:
-            self.print_maps_html()
-            self.print_html_footer()
+        self.print_html_footer()
 
     def init_vars(self, settings, monitor):
-
         self.vpns = list(monitor.vpns.items())
 
         self.site = 'Example'
@@ -475,17 +425,6 @@ class OpenvpnHtmlPrinter(object):
         self.logo = None
         if 'logo' in settings:
             self.logo = settings['logo']
-
-        self.maps = False
-        if 'maps' in settings and settings['maps'] == 'True':
-            self.maps = True
-
-        self.latitude = 40.72
-        self.longitude = -74
-        if 'latitude' in settings:
-            self.latitude = settings['latitude']
-        if 'longitude' in settings:
-            self.longitude = settings['longitude']
 
         self.datetime_format = settings['datetime_format']
 
@@ -506,9 +445,6 @@ class OpenvpnHtmlPrinter(object):
         output('<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha256-916EbMg70RQy9LHiGkXzG8hSg9EdNy97GazNG/aiY1w=" crossorigin="anonymous" />')         # noqa
         output('<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap-theme.min.css" integrity="sha256-ZT4HPpdCOt2lvDkXokHuhJfdOKSPFLzeAJik5U/Q+l4=" crossorigin="anonymous" />')   # noqa
         output('<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/jquery.tablesorter/2.30.6/css/theme.bootstrap.min.css" integrity="sha256-dXZ9g5NdsPlD0182JqLz9UFael+Ug5AYo63RfujWPu8=" crossorigin="anonymous" />') # noqa
-        if self.maps:
-            output('<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.1/leaflet.css" integrity="sha256-iYUgmrapfDGvBrePJPrMWQZDcObdAcStKBpjP3Az+3s=" crossorigin="anonymous" />')                       # noqa
-            output('<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/leaflet.fullscreen/1.4.5/Control.FullScreen.css" integrity="sha256-RTALnHN76PJ32RJx2mxggy+RUt9TIRV+mfPLSLbI75A=" crossorigin="anonymous" />') # noqa
         output('<style>')
         output('.panel-custom {')
         output('   background-color:#777;')
@@ -530,11 +466,6 @@ class OpenvpnHtmlPrinter(object):
         output('<script>$(document).ready(function(){')
         output('$("table.tablesorter").tablesorter({theme:"bootstrap", headerTemplate:"{content} {icon}", widgets:["uitheme"]});')
         output('});</script>')
-        if self.maps:
-            output('<script src="//cdnjs.cloudflare.com/ajax/libs/leaflet/1.3.1/leaflet.js" integrity="sha256-CNm+7c26DTTCGRQkM9vp7aP85kHFMqs9MhPEuytF+fQ=" crossorigin="anonymous"></script>')                             # noqa
-            output('<script src="//cdnjs.cloudflare.com/ajax/libs/OverlappingMarkerSpiderfier-Leaflet/0.2.6/oms.min.js" integrity="sha256-t+V41b9l6j8GMYAbpcnZbib1XiYwCAsDibD8sI1D7+Y=" crossorigin="anonymous"></script>') # noqa
-            output('<script src="//cdnjs.cloudflare.com/ajax/libs/leaflet.fullscreen/1.4.5/Control.FullScreen.min.js" integrity="sha256-ymsQ8vmYkMvP0tBKzewWBBnPnYm308ZoRQpeStgVR2Y=" crossorigin="anonymous"></script>')   # noqa
-
         output('</head><body>')
 
         output('<nav class="navbar navbar-inverse">')
@@ -562,9 +493,6 @@ class OpenvpnHtmlPrinter(object):
                 output('<li><a href="#{0!s}">{1!s}</a></li>'.format(anchor, vpn['name']))
         output('</ul></li>')
 
-        if self.maps:
-            output('<li><a href="#map_canvas">Map View</a></li>')
-
         output('</ul>')
 
         if self.logo:
@@ -578,8 +506,7 @@ class OpenvpnHtmlPrinter(object):
     @staticmethod
     def print_session_table_headers(vpn_mode, show_disconnect):
         server_headers = ['Username / Hostname', 'VPN IP',
-                          'Remote IP', 'Location', 'Bytes In',
-                          'Bytes Out', 'Connected Since', 'Last Ping', 'Time Online']
+                          'Remote IP', 'Connected Since', 'Last Ping', 'Time Online']
         if show_disconnect:
             server_headers.append('Action')
 
@@ -624,16 +551,8 @@ class OpenvpnHtmlPrinter(object):
             output('network or unix socket</div></div>')
 
     def print_vpn(self, vpn_id, vpn):
-
-        if vpn['state']['success'] == 'SUCCESS':
-            pingable = 'Yes'
-        else:
-            pingable = 'No'
-
         connection = vpn['state']['connected']
         nclients = vpn['stats']['nclients']
-        bytesin = vpn['stats']['bytesin']
-        bytesout = vpn['stats']['bytesout']
         vpn_mode = vpn['state']['mode']
         vpn_sessions = vpn['sessions']
         local_ip = vpn['state']['local_ip']
@@ -648,18 +567,15 @@ class OpenvpnHtmlPrinter(object):
         output('</div><div class="panel-body">')
         output('<div class="table-responsive">')
         output('<table class="table table-condensed table-responsive">')
-        output('<thead><tr><th>VPN Mode</th><th>Status</th><th>Pingable</th>')
-        output('<th>Clients</th><th>Total Bytes In</th><th>Total Bytes Out</th>')
+        output('<thead><tr><th>VPN Mode</th><th>Status</th>')
+        output('<th>Clients</th>')
         output('<th>Up Since</th><th>Local IP Address</th>')
         if vpn_mode == 'Client':
             output('<th>Remote IP Address</th>')
         output('</tr></thead><tbody>')
         output('<tr><td>{0!s}</td>'.format(vpn_mode))
         output('<td>{0!s}</td>'.format(connection))
-        output('<td>{0!s}</td>'.format(pingable))
         output('<td>{0!s}</td>'.format(nclients))
-        output('<td>{0!s} ({1!s})</td>'.format(bytesin, naturalsize(bytesin, binary=True)))
-        output('<td>{0!s} ({1!s})</td>'.format(bytesout, naturalsize(bytesout, binary=True)))
         output('<td>{0!s}</td>'.format(up_since.strftime(self.datetime_format)))
         output('<td>{0!s}</td>'.format(local_ip))
         if vpn_mode == 'Client':
@@ -692,33 +608,10 @@ class OpenvpnHtmlPrinter(object):
 
     def print_server_session(self, vpn_id, session, show_disconnect):
         total_time = str(datetime.now() - session['connected_since'])[:-7]
-        bytes_recv = session['bytes_recv']
-        bytes_sent = session['bytes_sent']
         output('<td>{0!s}</td>'.format(session['username']))
         output('<td>{0!s}</td>'.format(session['local_ip']))
         output('<td>{0!s}</td>'.format(session['remote_ip']))
 
-        if 'location' in session:
-            if session['location'] == 'RFC1918':
-                output('<td>RFC1918</td>')
-            else:
-                flag = 'images/flags/{0!s}.png'.format(session['location'].lower())
-                if 'country' in session and session['country'] is not None:
-                    country = session['country']
-                    full_location = country
-                if 'region' in session and session['region'] is not None:
-                    region = session['region']
-                    full_location = '{0!s}, {1!s}'.format(region, full_location)
-                if 'city' in session and session['city'] is not None:
-                    city = session['city']
-                    full_location = '{0!s}, {1!s}'.format(city, full_location)
-                output('<td><img src="{0!s}" title="{1!s}" alt="{1!s}" /> '.format(flag, full_location))
-                output('{0!s}</td>'.format(full_location))
-        else:
-            output('<td>Unknown</td>')
-
-        output('<td>{0!s} ({1!s})</td>'.format(bytes_recv, naturalsize(bytes_recv, binary=True)))
-        output('<td>{0!s} ({1!s})</td>'.format(bytes_sent, naturalsize(bytes_sent, binary=True)))
         output('<td>{0!s}</td>'.format(
             session['connected_since'].strftime(self.datetime_format)))
         if 'last_seen' in session:
@@ -749,53 +642,6 @@ class OpenvpnHtmlPrinter(object):
                     continue
                 self.print_server_session(vpn_id, session, show_disconnect)
             output('</tr>')
-
-    def print_maps_html(self):
-        output('<div class="panel panel-info"><div class="panel-heading">')
-        output('<h3 class="panel-title">Map View</h3></div><div class="panel-body">')
-        output('<div id="map_canvas" style="height:500px"></div>')
-        output('<script type="text/javascript">')
-        output('var map = L.map("map_canvas", { fullscreenControl: true, '
-               'fullscreenControlOptions: { position: "topleft" }  });')
-        output('var centre = L.latLng({0!s}, {1!s});'.format(self.latitude, self.longitude))
-        output('map.setView(centre, 8);')
-        output('url = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";')
-        output('var layer = new L.TileLayer(url, {});')
-        output('map.addLayer(layer);')
-        output('var bounds = L.latLngBounds(centre);')
-        output('var oms = new OverlappingMarkerSpiderfier '
-               '(map,{keepSpiderfied:true});')
-        # spiderfy - add popups for closeby icons
-        output('var popup = new L.Popup({closeButton:false,'
-               'offset:new L.Point(0.5,-24)});')
-        output('oms.addListener("click", function(marker) {')
-        output('   popup.setContent(marker.alt);')
-        output('   popup.setLatLng(marker.getLatLng());')
-        output('   map.openPopup(popup);')
-        output('});')
-        # spiderfy - close popups when clicking elsewhere
-        output('oms.addListener("spiderfy", function(markers) {')
-        output('   map.closePopup();')
-        output('});')
-        for vkey, vpn in self.vpns:
-            if 'sessions' in vpn:
-                output('bounds.extend(centre);')
-                for skey, session in list(vpn['sessions'].items()):
-                    if 'local_ip' not in session or not session['local_ip']:
-                        continue
-                    if 'longitude' in session and 'latitude' in session:
-                        output('var latlng = new L.latLng({0!s}, {1!s});'.format(
-                            session['latitude'], session['longitude']))
-                        output('bounds.extend(latlng);')
-                        output('var client_marker = L.marker(latlng).addTo(map);')
-                        output('oms.addMarker(client_marker);')
-                        output('var client_popup = L.popup().setLatLng(latlng);')
-                        output('client_popup.setContent("{0!s} - {1!s}");'.format(
-                            session['username'], session['remote_ip']))
-                        output('client_marker.bindPopup(client_popup);')
-        output('map.fitBounds(bounds);')
-        output('</script>')
-        output('</div></div>')
 
     def print_html_footer(self):
         output('<div class="well well-sm">')
