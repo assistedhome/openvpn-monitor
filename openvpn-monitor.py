@@ -608,7 +608,7 @@ class OpenvpnHtmlPrinter(object):
 
     def print_server_session(self, vpn_id, session, show_disconnect):
         total_time = str(datetime.now() - session['connected_since'])[:-7]
-        output('<td>{0!s}</td>'.format(session['username']))
+        output('<td><a href="http://{0!s}">{0!s}</a></td>'.format(session['username']))
         output('<td>{0!s}</td>'.format(session['local_ip']))
         output('<td>{0!s}</td>'.format(session['remote_ip']))
 
